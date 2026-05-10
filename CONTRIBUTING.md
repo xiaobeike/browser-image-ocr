@@ -14,6 +14,7 @@ Thanks for contributing to Browser Image OCR.
 
 - Keep the project lightweight and easy to run locally.
 - Prefer OpenAI-compatible endpoint compatibility over vendor-specific behavior.
+- When adding vendor-specific support, isolate it behind a provider adapter instead of mixing request formats together.
 - Do not commit secrets, API keys, or personal tokens.
 
 ## Pull requests
