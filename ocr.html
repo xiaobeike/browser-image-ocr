@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Browser Image OCR</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="backdrop backdropA"></div>
+  <div class="backdrop backdropB"></div>
+  <main class="app">
+    <section class="card hero">
+      <div class="heroCopy">
+        <p class="eyebrow">Browser Image OCR</p>
+        <h1>把网页图片 OCR 做成一个顺手的右键动作</h1>
+        <p class="heroText">支持自定义 OpenAI-compatible 接口，适合识别截图、海报、分享卡片、链接卡片和普通网页图片中的文字。</p>
+        <div class="heroMeta">
+          <span id="versionBadge" class="pill accent">v0.5.0</span>
+          <span class="pill">OpenAI-compatible</span>
+          <span class="pill">Local Extension</span>
+        </div>
+      </div>
+      <div class="heroPanel">
+        <p class="panelKicker">Ready to Scan</p>
+        <p id="runtimeMeta" class="panelText">正在读取扩展版本与安装状态…</p>
+        <button id="recognizeBtn" class="primary large">开始识别</button>
+        <p class="panelHint">如果图片识别失败，优先把图片传输方式切到“强制 Base64”。</p>
+      </div>
+    </section>
+
+    <section class="grid gridPrimary">
+      <section class="card mediaCard">
+        <div class="sectionHead">
+          <div>
+            <h2>待识别图片</h2>
+            <p class="muted">从右键菜单传入原图地址，必要时会在发送前转成 Base64。</p>
+          </div>
+          <span class="miniBadge">Preview</span>
+        </div>
+        <div class="imageWrap">
+          <img id="preview" alt="待识别图片" />
+        </div>
+        <p id="imageUrl" class="muted break"></p>
+      </section>
+
+      <section class="card settingsCard">
+        <div class="sectionHead">
+          <div>
+            <h2>接口设置</h2>
+            <p class="muted">Base URL、模型和请求模式会保存在本机浏览器扩展存储中。</p>
+          </div>
+          <span class="miniBadge">Persisted</span>
+        </div>
+        <label>
+          Base URL
+          <input id="baseUrl" type="url" placeholder="https://api.openai.com/v1 或你的中转站 /v1" autocomplete="off" />
+        </label>
+        <label>
+          API Key
+          <input id="apiKey" type="password" placeholder="sk-... 或你的中转站 Key" autocomplete="off" />
+        </label>
+        <label>
+          模型
+          <input id="model" type="text" placeholder="例如 gpt-4.1-mini / gpt-4o-mini / 你的模型名" />
+        </label>
+        <label>
+          接口格式
+          <select id="apiMode">
+            <option value="chat">Chat Completions：/chat/completions（兼容性最好）</option>
+            <option value="responses">Responses：/responses（OpenAI 新接口）</option>
+          </select>
+        </label>
+        <label>
+          图片传输方式
+          <select id="imageMode">
+            <option value="auto">自动：优先转 Base64，失败再传图片 URL</option>
+            <option value="base64">强制 Base64：适合防盗链图片</option>
+            <option value="url">只传 URL：速度快，但要求模型服务能访问图片</option>
+          </select>
+        </label>
+        <div class="row actionRow">
+          <button id="saveKeyBtn">保存设置</button>
+          <button id="clearKeyBtn">清除 Key</button>
+        </div>
+        <div class="tipBox">
+          <strong>使用建议</strong>
+          <p>大多数中转站优先选 `Chat Completions`。如果模型拿不到原图，就把图片传输方式切到“强制 Base64”。</p>
+        </div>
+      </section>
+    </section>
+
+    <section class="grid gridSecondary">
+      <section class="card resultCard">
+        <div class="resultHeader">
+          <div>
+            <h2>识别结果</h2>
+            <p class="muted">结果支持手动修订、复制全文，或者直接打开提取到的第一个链接。</p>
+          </div>
+          <div class="row">
+            <button id="copyAllBtn">复制全部</button>
+            <button id="copyUrlBtn">复制第一个链接</button>
+            <button id="openUrlBtn">打开第一个链接</button>
+          </div>
+        </div>
+        <div id="status" class="status">准备就绪</div>
+        <textarea id="result" placeholder="识别结果会出现在这里，可以手动修改后复制。"></textarea>
+      </section>
+
+      <aside class="card sideCard">
+        <section class="sideBlock">
+          <h2>提取到的链接</h2>
+          <div id="links" class="links muted">暂无</div>
+        </section>
+        <section class="sideBlock">
+          <h2>版本与升级</h2>
+          <p class="muted">当前版本：<span id="versionText" class="mono">读取中…</span></p>
+          <div class="noteStack">
+            <article class="infoNote">
+              <strong>版本概念</strong>
+              <p>有版本号，当前扩展版本来自 `manifest.json`。这次界面升级后版本是 `0.5.0`。</p>
+            </article>
+            <article class="infoNote">
+              <strong>本地加载不会自动升级</strong>
+              <p>通过“加载解压缩的扩展”安装时，浏览器不会像应用商店那样自动拉新版本。</p>
+            </article>
+            <article class="infoNote">
+              <strong>如何升级</strong>
+              <p>拉取或替换最新代码后，打开 `edge://extensions`，在当前扩展卡片上点击“刷新”即可升级到最新版本。</p>
+            </article>
+            <article class="infoNote">
+              <strong>什么时候能自动升级</strong>
+              <p>只有发布到 Chrome Web Store 或 Edge Add-ons 后，用户通过商店安装，后续通常才会自动更新。</p>
+            </article>
+          </div>
+        </section>
+      </aside>
+    </section>
+  </main>
+  <script src="ocr.js"></script>
+</body>
+</html>
