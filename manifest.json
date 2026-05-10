@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Browser Image OCR",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Right-click web images and run high-accuracy OCR through an OpenAI-compatible endpoint.",
   "permissions": [
     "contextMenus",

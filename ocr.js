@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 
 const preview = $('preview');
 const imageUrlEl = $('imageUrl');
+const providerEl = $('provider');
 const baseUrlEl = $('baseUrl');
 const apiKeyEl = $('apiKey');
 const modelEl = $('model');
@@ -10,9 +11,9 @@ const imageModeEl = $('imageMode');
 const resultEl = $('result');
 const statusEl = $('status');
 const linksEl = $('links');
-const versionBadgeEl = $('versionBadge');
 const versionTextEl = $('versionText');
 const runtimeMetaEl = $('runtimeMeta');
+const resultSectionEl = $('resultSection');
 
 const params = new URLSearchParams(location.search);
 const imageSrc = params.get('src') || '';
@@ -28,13 +29,15 @@ async function init() {
     'openaiBaseUrl',
     'openaiApiKey',
     'openaiModel',
+    'openaiProvider',
     'openaiApiMode',
     'openaiImageMode'
   ]);
 
+  providerEl.value = saved.openaiProvider || 'openai';
   baseUrlEl.value = saved.openaiBaseUrl || 'https://api.openai.com/v1';
   apiKeyEl.value = saved.openaiApiKey || '';
-  modelEl.value = saved.openaiModel || 'gpt-4.1-mini';
+  modelEl.value = saved.openaiModel || 'gpt-5.2';
   apiModeEl.value = saved.openaiApiMode || 'chat';
   imageModeEl.value = saved.openaiImageMode || 'auto';
 
@@ -58,7 +61,8 @@ async function saveSettings() {
   await chrome.storage.local.set({
     openaiBaseUrl: normalizeBaseUrl(baseUrlEl.value.trim() || 'https://api.openai.com/v1'),
     openaiApiKey: apiKeyEl.value.trim(),
-    openaiModel: modelEl.value.trim() || 'gpt-4.1-mini',
+    openaiModel: modelEl.value.trim() || 'gpt-5.2',
+    openaiProvider: providerEl.value || 'openai',
     openaiApiMode: apiModeEl.value,
     openaiImageMode: imageModeEl.value
   });
@@ -73,9 +77,10 @@ async function clearSettings() {
 }
 
 async function recognize() {
+  const provider = providerEl.value || 'openai';
   const baseUrl = normalizeBaseUrl(baseUrlEl.value.trim() || 'https://api.openai.com/v1');
   const apiKey = apiKeyEl.value.trim();
-  const model = modelEl.value.trim() || 'gpt-4.1-mini';
+  const model = modelEl.value.trim() || 'gpt-5.2';
   const apiMode = apiModeEl.value || 'chat';
   const imageMode = imageModeEl.value || 'auto';
 
@@ -88,22 +93,30 @@ async function recognize() {
   renderLinks([]);
   setStatus('正在准备图片并调用接口……');
   $('recognizeBtn').disabled = true;
+  scrollToResult();
 
   try {
     const imageUrlForApi = await prepareImageForApi(imageSrc, imageMode);
-    setStatus(`正在识别……\n接口：${baseUrl}/${apiMode === 'chat' ? 'chat/completions' : 'responses'}\n图片方式：${imageUrlForApi.startsWith('data:') ? 'Base64' : 'URL'}`);
+    setStatus(`正在识别……\n提供商：${providerLabel(provider)}\n接口：${describeEndpoint(provider, baseUrl, apiMode)}\n图片方式：${imageUrlForApi.startsWith('data:') ? 'Base64' : 'URL'}`);
 
-    const output = apiMode === 'responses'
-      ? await callResponsesVisionOCR({ baseUrl, apiKey, model, imageUrlForApi })
-      : await callChatCompletionsVisionOCR({ baseUrl, apiKey, model, imageUrlForApi });
+    const output = await recognizeByProvider({
+      provider,
+      baseUrl,
+      apiKey,
+      model,
+      apiMode,
+      imageUrlForApi
+    });
 
     const polished = postProcess(output);
     resultEl.value = polished;
     renderLinks(getLinks(polished));
     setStatus('识别完成。', false, true);
+    scrollToResult();
   } catch (err) {
     console.error(err);
     setStatus(formatError(err), true);
+    scrollToResult();
   } finally {
     $('recognizeBtn').disabled = false;
   }
@@ -122,11 +135,35 @@ function syncRuntimeInfo() {
   const manifest = chrome.runtime.getManifest();
   const version = manifest?.version || 'dev';
   document.title = `${manifest?.name || 'Browser Image OCR'} v${version}`;
-  if (versionBadgeEl) versionBadgeEl.textContent = `v${version}`;
   if (versionTextEl) versionTextEl.textContent = `v${version}`;
   if (runtimeMetaEl) {
     runtimeMetaEl.textContent = '当前是本地加载扩展。更新代码后，需要到 edge://extensions 或 chrome://extensions 手动点击“刷新”。';
   }
+}
+
+function scrollToResult() {
+  resultSectionEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function providerLabel(provider) {
+  if (provider === 'anthropic') return 'Anthropic Claude';
+  if (provider === 'gemini-openai') return 'Gemini（OpenAI 兼容）';
+  return 'OpenAI / 通用兼容';
+}
+
+function describeEndpoint(provider, baseUrl, apiMode) {
+  if (provider === 'anthropic') return `${baseUrl}/messages`;
+  return `${baseUrl}/${apiMode === 'chat' ? 'chat/completions' : 'responses'}`;
+}
+
+async function recognizeByProvider({ provider, baseUrl, apiKey, model, apiMode, imageUrlForApi }) {
+  if (provider === 'anthropic') {
+    return await callAnthropicVisionOCR({ baseUrl, apiKey, model, imageUrlForApi });
+  }
+  if (apiMode === 'responses') {
+    return await callResponsesVisionOCR({ baseUrl, apiKey, model, imageUrlForApi });
+  }
+  return await callChatCompletionsVisionOCR({ baseUrl, apiKey, model, imageUrlForApi });
 }
 
 function joinEndpoint(baseUrl, path) {
@@ -247,6 +284,38 @@ async function callResponsesVisionOCR({ baseUrl, apiKey, model, imageUrlForApi }
   return data.output_text || extractTextFromResponse(data);
 }
 
+async function callAnthropicVisionOCR({ baseUrl, apiKey, model, imageUrlForApi }) {
+  const imagePart = imageUrlForApi.startsWith('data:')
+    ? dataUrlToAnthropicImageSource(imageUrlForApi)
+    : {
+        type: 'image',
+        source: {
+          type: 'url',
+          url: imageUrlForApi
+        }
+      };
+
+  const body = {
+    model,
+    max_tokens: 1500,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: buildPrompt()
+          },
+          imagePart
+        ]
+      }
+    ]
+  };
+
+  const data = await postAnthropicJson(joinEndpoint(baseUrl, '/messages'), apiKey, body);
+  return extractTextFromAnthropic(data);
+}
+
 async function postJson(url, apiKey, body) {
   const res = await fetch(url, {
     method: 'POST',
@@ -267,6 +336,50 @@ async function postJson(url, apiKey, body) {
   }
 
   return data;
+}
+
+async function postAnthropicJson(url, apiKey, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify(body)
+  });
+
+  const text = await res.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+
+  if (!res.ok) {
+    const msg = data?.error?.message || data?.message || data?.raw || `${res.status} ${res.statusText}`;
+    throw new Error(msg);
+  }
+
+  return data;
+}
+
+function dataUrlToAnthropicImageSource(dataUrl) {
+  const match = String(dataUrl).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) throw new Error('Anthropic 接口当前要求图片 URL 或 Base64 data URL。');
+  return {
+    type: 'image',
+    source: {
+      type: 'base64',
+      media_type: match[1],
+      data: match[2]
+    }
+  };
+}
+
+function extractTextFromAnthropic(data) {
+  const chunks = [];
+  for (const item of data?.content || []) {
+    if (item?.type === 'text' && item?.text) chunks.push(item.text);
+  }
+  return chunks.join('\n').trim();
 }
 
 function extractTextFromResponse(data) {
